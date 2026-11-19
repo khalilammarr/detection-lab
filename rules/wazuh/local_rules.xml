@@ -1,0 +1,217 @@
+<!-- Local rules -->
+
+<!-- Modify it at your will. -->
+<!-- Copyright (C) 2015, Wazuh Inc. -->
+
+<!-- Example -->
+<group name="local,syslog,sshd,">
+
+  <!--
+  Dec 10 01:02:02 host sshd[1234]: Failed none for root from 192.0.2.1 port 1066 ssh2
+  -->
+  <rule id="100001" level="5">
+    <if_sid>5716</if_sid>
+    <srcip>192.0.2.1</srcip>
+    <description>sshd: authentication failed from IP 192.0.2.1.</description>
+    <group>authentication_failed,pci_dss_10.2.4,pci_dss_10.2.5,</group>
+  </rule>
+
+</group>
+
+<group name="syscheck,yara,">
+  <rule id="100200" level="7">
+    <if_sid>554</if_sid>
+    <field name="file">/home/labuser/malware-test</field>
+    <description>Fichier ajoute dans malware-test - scan YARA declenche</description>
+  </rule>
+  <rule id="100210" level="12">
+    <decoded_as>yara_decoder</decoded_as>
+    <description>YARA: Malware detecte - regle $(yara_rule) dans $(yara_scanned_file)</description>
+    <mitre><id>T1204</id></mitre>
+  </rule>
+</group>
+
+<group name="suricata,ids,attack,">
+  <!-- Escalade basee sur la CATEGORIE Suricata (classtype = intention reelle),
+       plus robuste que le prefixe du nom de regle (ET SCAN/WEB_SERVER/...). -->
+
+  <!-- CRITIQUE (niveau 12) : privesc admin, trojan, C2, exploitation reussie -->
+  <rule id="100501" level="12">
+    <if_sid>86601</if_sid>
+    <field name="alert.category" type="pcre2">(?i)(Administrator Privilege Gain|Network Trojan|Command and Control|Successful)</field>
+    <description>Suricata: attaque reseau CRITIQUE - $(alert.signature)</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+  </rule>
+
+  <!-- SIGNIFICATIVE (niveau 10) : attaque web, scan, vol d'info, privesc user, exploit -->
+  <rule id="100500" level="10">
+    <if_sid>86601</if_sid>
+    <field name="alert.category" type="pcre2">(?i)(Web Application Attack|User Privilege Gain|Information Leak|Network Scan|Potentially Bad Traffic|Executable|Exploit|Denial of Service)</field>
+    <description>Suricata: attaque reseau significative - $(alert.signature)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+  </rule>
+
+  <!-- Filet de securite : le nom contient explicitement une categorie d'attaque -->
+  <rule id="100502" level="10">
+    <if_sid>86601</if_sid>
+    <field name="alert.signature" type="pcre2">(?i)(ET EXPLOIT|ET WEB_SERVER|ET WEB_SPECIFIC_APPS|ET MALWARE|ET TROJAN|ET CNC|ET ATTACK_RESPONSE|ET SCAN|Nmap|masscan|Zmap|unicornscan|port ?scan|Shellshock|CVE-)</field>
+    <description>Suricata: signature d'attaque reseau - $(alert.signature)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+  </rule>
+</group>
+
+
+<!-- ============================================================= -->
+<!-- Connexions hors horaires de bureau (nuit 22h00 - 06h00)       -->
+<!-- Une connexion reussie la nuit est suspecte en entreprise :    -->
+<!-- compte compromis, acces hors process, activite d'attaquant.   -->
+<!-- Le champ natif <time> de Wazuh limite la regle a la nuit.     -->
+<!-- ============================================================= -->
+<group name="local,authentication,off_hours,">
+
+  <!-- Connexion Windows reussie (EventID 4624) la nuit -->
+  <rule id="100600" level="10">
+    <if_sid>60106,60118</if_sid>
+    <time>10:00 pm - 6:00 am</time>
+    <description>Connexion Windows HORS HORAIRES (nuit) - utilisateur $(win.eventdata.targetUserName)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>off_hours,authentication_success,pci_dss_10.2.5,</group>
+  </rule>
+
+  <!-- Connexion SSH reussie la nuit -->
+  <rule id="100601" level="10">
+    <if_sid>5715</if_sid>
+    <time>10:00 pm - 6:00 am</time>
+    <description>Connexion SSH HORS HORAIRES (nuit) - utilisateur $(dstuser)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>off_hours,authentication_success,pci_dss_10.2.5,</group>
+  </rule>
+
+</group>
+
+<!-- ============================================================= -->
+<!-- Peripheriques USB / externes branches (exfiltration, BadUSB)   -->
+<!-- Windows base 60227 (EventID 6416 ; requiert 'Audit PnP Activity')-->
+<!-- Linux base 81101 ("New USB device found", decodeur kernel)     -->
+<!-- IDs en 110700+ : hors de la plage SOCFortress 100100-101299.   -->
+<!-- ============================================================= -->
+<group name="local,usb,removable_device,">
+
+  <!-- Windows : tout nouveau peripherique externe/USB branche -->
+  <rule id="110700" level="10">
+    <if_sid>60227</if_sid>
+    <description>Peripherique externe/USB branche sur $(win.system.computer) : $(win.eventdata.deviceDescription)</description>
+    <mitre>
+      <id>T1200</id>
+    </mitre>
+    <group>usb,removable_device,pci_dss_10.6.1,</group>
+  </rule>
+
+  <!-- Windows : BadUSB / Rubber Ducky = nouveau CLAVIER/HID (par ClassId GUID) -->
+  <rule id="110701" level="13">
+    <if_sid>60227</if_sid>
+    <field name="win.eventdata.classId" type="pcre2">(?i)(4d36e96b-e325-11ce-bfc1-08002be10318|745a17a0-74d3-11d0-b6fe-00a0c90f57da)</field>
+    <description>ALERTE BadUSB : nouveau clavier/HID branche (possible Rubber Ducky) sur $(win.system.computer)</description>
+    <mitre>
+      <id>T1200</id>
+    </mitre>
+    <group>usb,badusb,removable_device,</group>
+  </rule>
+
+  <!-- Windows : BadUSB filet de securite par nom de classe -->
+  <rule id="110702" level="13">
+    <if_sid>60227</if_sid>
+    <field name="win.eventdata.className" type="pcre2">(?i)(keyboard|HIDClass|clavier)</field>
+    <description>ALERTE BadUSB : nouveau clavier/HID branche (possible Rubber Ducky) sur $(win.system.computer)</description>
+    <mitre>
+      <id>T1200</id>
+    </mitre>
+    <group>usb,badusb,removable_device,</group>
+  </rule>
+
+  <!-- Linux : nouveau peripherique USB branche -->
+  <rule id="110703" level="10">
+    <if_sid>81101</if_sid>
+    <description>Peripherique USB branche sur hote Linux (possible exfiltration / introduction de malware)</description>
+    <mitre>
+      <id>T1200</id>
+    </mitre>
+    <group>usb,removable_device,</group>
+  </rule>
+
+</group>
+
+<!-- ============================================================= -->
+<!-- Detections prioritaires (alertes SOC les plus courantes)       -->
+<!-- IDs 110800+ (hors plage SOCFortress). Groupe partage soc_alert -->
+<!-- -> notification Telegram (integration dediee).                 -->
+<!-- ============================================================= -->
+<group name="local,">
+
+  <!-- 1) Journal d'audit Windows EFFACE (EventID 1102) - dissimulation -->
+  <rule id="110800" level="12">
+    <if_sid>60117</if_sid>
+    <description>Journal d'audit Windows EFFACE sur $(win.system.computer) - possible dissimulation d'attaque</description>
+    <mitre>
+      <id>T1070.001</id>
+    </mitre>
+    <group>soc_alert,logs_cleared,defense_evasion,</group>
+  </rule>
+
+  <!-- 2a) Nouveau compte Windows cree (EventID 4720) -->
+  <rule id="110810" level="10">
+    <if_sid>60109</if_sid>
+    <description>Nouveau compte Windows cree : $(win.eventdata.targetUserName) sur $(win.system.computer)</description>
+    <mitre>
+      <id>T1136.001</id>
+    </mitre>
+    <group>soc_alert,account_created,persistence,</group>
+  </rule>
+
+  <!-- 2b) Compte ajoute a un groupe ADMIN privilegie (4728/4732 vers RID -512/-519/-544...) -->
+  <rule id="110811" level="12">
+    <if_sid>60113</if_sid>
+    <field name="win.eventdata.targetSid" type="pcre2">(-512|-518|-519|-520|-544)$</field>
+    <description>Compte ajoute a un groupe ADMIN privilegie sur $(win.system.computer) - escalade de privileges possible</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>soc_alert,privileged_group,privilege_escalation,</group>
+  </rule>
+
+  <!-- 3) Connexion REUSSIE apres brute-force = COMPTE COMPROMIS.
+       Wazuh detecte deja la sequence (regle native 40112) ; on l'escalade
+       et on la tague soc_alert pour notification. -->
+  <rule id="110820" level="13">
+    <if_sid>40112</if_sid>
+    <description>Connexion REUSSIE apres brute-force ($(srcip)) - COMPTE PROBABLEMENT COMPROMIS</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>soc_alert,account_compromised,</group>
+  </rule>
+
+  <!-- 4) Kerberoasting : ticket TGS RC4 (0x17) demande pour un service (T1558.003) -->
+  <rule id="110830" level="12">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^4769$</field>
+    <field name="win.eventdata.ticketEncryptionType">^0x17$</field>
+    <field name="win.eventdata.serviceName" negate="yes" type="pcre2">(?i)(krbtgt|\$$)</field>
+    <description>Kerberoasting possible : ticket TGS RC4 demande pour le service $(win.eventdata.serviceName) (T1558.003)</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+    <group>soc_alert,kerberoasting,credential_access,</group>
+  </rule>
+
+</group>
