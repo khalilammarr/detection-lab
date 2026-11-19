@@ -84,4 +84,4 @@ Secrets are not in the files: copy the `.env.example` files and set the variable
 - A port scan produced more than 10 Telegram messages; there is no deduplication.
 - Blind spots: in-memory malware, encrypted traffic, keystroke injection after a BadUSB device is accepted, slow or distributed brute force, machines without an agent.
 - Shuffle's runner mounts the Docker socket (root-equivalent), the original lab kept some secrets in clear text in workflow nodes, and approval links are bare webhook URLs with no identity check or expiry. There is no high availability or monitoring of the SOC itself.
-- TheHive 5's licence model was not verified, so I do not claim the whole stack is open source. No license is included yet.
+- TheHive 5's licence model was not verified, so I do not claim the whole stack is open source. The lab's own files are MIT ([LICENSE](LICENSE)); `deploy/wazuh/docker-compose.yml` is derived from wazuh-docker and keeps its GPLv2 header.
