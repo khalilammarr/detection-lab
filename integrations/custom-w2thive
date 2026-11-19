@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+# =====================================================================
+# Integration Wazuh -> TheHive  (lab SOC)
+# Cree AUTOMATIQUEMENT une ALERTE dans TheHive a partir d'une alerte Wazuh.
+# (L'analyste la promeut en Case en 1 clic — jamais de creation manuelle.)
+#
+# Wazuh appelle : custom-w2thive <alert_file> <api_key> <hook_url> ...
+#   - <api_key>  : cle API du user de service TheHive  (ossec.conf)
+#   - <hook_url> : URL de l'API TheHive, ex http://172.17.0.1:9000  (ossec.conf)
+#
+# A placer dans /var/ossec/integrations/custom-w2thive (chmod 750, root:wazuh)
+# =====================================================================
+import sys, json, urllib.request, datetime
+
+LOG = "/var/ossec/logs/integrations-thehive.log"
+
+def log(m):
+    ts = datetime.datetime.now().isoformat(timespec="seconds")
+    try:
+        open(LOG, "a").write(f"{ts} {m}\n")
+    except Exception:
+        pass
+
+def main():
+    if len(sys.argv) < 4:
+        log("ERREUR: arguments manquants (alert_file api_key hook_url)")
+        return
+    alert_file, api_key, hook_url = sys.argv[1], sys.argv[2], sys.argv[3].rstrip("/")
+    try:
+        alert = json.load(open(alert_file))
+    except Exception as e:
+        log(f"ERREUR lecture alerte: {e}"); return
+
+    rule  = alert.get("rule", {})
+    agent = alert.get("agent", {})
+    data  = alert.get("data", {})
+    level = int(rule.get("level", 0))
+    desc  = rule.get("description", "Alerte Wazuh")
+    rid   = rule.get("id", "")
+    mitre = rule.get("mitre", {}).get("id", []) if isinstance(rule.get("mitre"), dict) else []
+    an    = agent.get("name", "?")
+    src   = data.get("srcip") or data.get("win", {}).get("eventdata", {}).get("ipAddress", "")
+
+    # severite TheHive : 1=low 2=medium 3=high 4=critical
+    sev = 4 if level >= 12 else 3 if level >= 10 else 2 if level >= 7 else 1
+
+    observables = []
+    if src:
+        observables.append({"dataType": "ip", "data": src, "tags": ["wazuh", "srcip"]})
+    if an and an != "?":
+        observables.append({"dataType": "hostname", "data": an, "tags": ["wazuh", "agent"]})
+
+    body = {
+        "type": "wazuh-alert",
+        "source": "wazuh",
+        "sourceRef": f"{rid}-{alert.get('id','')[:20]}",
+        "title": f"[Wazuh {rid}] {desc}",
+        "description": (
+            f"**Agent**: {an}\n**Niveau**: {level}\n"
+            + (f"**Source**: {src}\n" if src else "")
+            + (f"**MITRE**: {', '.join(mitre)}\n" if mitre else "")
+            + f"\n```\n{json.dumps(rule, indent=2)[:1500]}\n```"
+        ),
+        "severity": sev,
+        "tags": ["wazuh", f"level:{level}"] + [f"mitre:{m}" for m in mitre],
+        "observables": observables,
+    }
+
+    req = urllib.request.Request(
+        f"{hook_url}/api/v1/alert",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            log(f"OK cree alerte TheHive (rule={rid} level={level}) HTTP {r.status}")
+    except Exception as e:
+        log(f"ERREUR creation alerte TheHive (rule={rid}): {e}")
+
+if __name__ == "__main__":
+    main()

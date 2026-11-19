@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+# =====================================================================
+# Integration Wazuh -> Telegram  (lab SOC)
+# Wazuh appelle : custom-telegram <alert_file> <api_key> <hook_url> ...
+# On lit l'alerte JSON, on formate un message et on le POST a Telegram.
+# A placer dans /var/ossec/integrations/custom-telegram (chmod 750, root:wazuh)
+# =====================================================================
+import os, sys, json, urllib.request, urllib.parse, datetime
+
+# --- Secrets du bot : jamais dans le depot ---------------------------
+# Lus dans l'environnement, sinon dans /var/ossec/etc/telegram.env
+# (lignes KEY=VALUE, chmod 640, root:wazuh). Voir deploy/README.md.
+ENV_FILE = "/var/ossec/etc/telegram.env"
+
+
+def _setting(name):
+    if os.environ.get(name):
+        return os.environ[name]
+    try:
+        with open(ENV_FILE) as f:
+            for line in f:
+                key, _, value = line.strip().partition("=")
+                if key == name:
+                    return value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+BOT_TOKEN = _setting("TELEGRAM_BOT_TOKEN")   # ${TELEGRAM_BOT_TOKEN}
+CHAT_ID   = _setting("TELEGRAM_CHAT_ID")     # ${TELEGRAM_CHAT_ID}
+LOG       = "/var/ossec/logs/integrations-telegram.log"
+
+def log(msg):
+    ts = datetime.datetime.now().isoformat(timespec="seconds")
+    try:
+        with open(LOG, "a") as f:
+            f.write(f"{ts} {msg}\n")
+    except Exception:
+        pass
+
+def main():
+    if len(sys.argv) < 2:
+        log("ERREUR: pas de fichier d'alerte en argument")
+        return
+    if not BOT_TOKEN or not CHAT_ID:
+        log("ERREUR: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID non definis")
+        return
+    try:
+        with open(sys.argv[1]) as f:
+            alert = json.load(f)
+    except Exception as e:
+        log(f"ERREUR lecture alerte: {e}")
+        return
+
+    rule  = alert.get("rule", {})
+    agent = alert.get("agent", {})
+    data  = alert.get("data", {})
+    level = rule.get("level", "?")
+    desc  = rule.get("description", "")
+    rid   = rule.get("id", "")
+    mitre = rule.get("mitre", {}).get("id", []) if isinstance(rule.get("mitre"), dict) else []
+    an    = agent.get("name", "?")
+    src   = data.get("srcip") or data.get("win", {}).get("eventdata", {}).get("ipAddress", "")
+    ts    = alert.get("timestamp", "")
+
+    lines = [
+        "\U0001F6A8 *SOC Lab* — ALERTE",
+        "",
+        f"*Règle* : {rid} — {desc}",
+        f"*Niveau* : {level}",
+        f"*Agent* : {an}",
+    ]
+    if src:   lines.append(f"*Source* : {src}")
+    if mitre: lines.append(f"*MITRE* : {', '.join(mitre)}")
+    lines.append(f"*Heure* : {ts}")
+    text = "\n".join(lines)
+
+    payload = urllib.parse.urlencode({
+        "chat_id": CHAT_ID, "parse_mode": "Markdown", "text": text
+    }).encode()
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=payload), timeout=15) as r:
+            body = r.read().decode()
+            ok = '"ok":true' in body
+            log(f"{'OK' if ok else 'REPONSE'} rule={rid} level={level} -> {body[:120]}")
+    except Exception as e:
+        log(f"ERREUR envoi Telegram (rule={rid}): {e}")
+
+if __name__ == "__main__":
+    main()
