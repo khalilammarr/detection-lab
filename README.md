@@ -8,31 +8,10 @@ It covers Kerberoasting, log clearing, new accounts and privileged-group changes
 
 ## Architecture
 
-```mermaid
-flowchart LR
-  subgraph fleet["Protected network (behind OPNsense)"]
-    DC["Windows DC<br/>Security + Sysmon"]
-    CL["Windows client"]
-    LX["Linux host<br/>FIM + YARA"]
-    SN["Suricata sensor<br/>eve.json"]
-  end
-  DC --> WZ
-  CL --> WZ
-  LX --> WZ
-  SN --> WZ
-  WZ["Wazuh manager<br/>local rules, ATT&CK tags"]
-  WZ -->|"level 10+"| TH["TheHive"]
-  TH --- CX["Cortex<br/>VirusTotal analyzer"]
-  WZ -->|"level 10+, direct"| TG["Telegram"]
-  WZ -->|"webhook by rule group"| SH["Shuffle playbooks"]
-  SH -->|"enrich source IP"| VT["VirusTotal"]
-  SH --> TH
-  SH --> TG
-  WZ -.->|"active response<br/>firewall-drop / isolate-host"| LX
-  SH -.->|"block request<br/>(approval-gated workflow)"| AP{"Analyst approves<br/>on Telegram?"}
-  AP -->|"approve"| OP["OPNsense<br/>SOC_blocklist alias"]
-  AP -->|"deny"| NO["No action, notify"]
-```
+<p align="center"><img src="docs/readme-diagram.svg" width="100%" alt="Architecture diagram"></p>
+
+<sub>Diagram source: [docs/diagrams/readme-diagram.mmd](docs/diagrams/readme-diagram.mmd)</sub>
+
 
 Solid lines ran in the lab. Dotted lines are response paths: the two active responses run on the agent without going through Shuffle, and the approval-gated block is a built workflow that was not in the final live path (see below). OPNsense also sends its filter log to Wazuh over syslog.
 
