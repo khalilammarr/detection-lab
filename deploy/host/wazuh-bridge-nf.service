@@ -1,0 +1,16 @@
+# RECONSTRUCTION. The project notes describe a systemd timer named
+# wazuh-bridge-nf.timer that reapplies net.bridge.bridge-nf-call-iptables=0 at
+# boot and every 20 seconds. The original unit files were not preserved; this
+# pair is written from that description and has not been run from this repository.
+# See docs/postmortem-swarm-netfilter.md.
+#
+# Install:
+#   sudo cp wazuh-bridge-nf.service wazuh-bridge-nf.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now wazuh-bridge-nf.timer
+[Unit]
+Description=Keep bridge-nf-call-iptables at 0 so Wazuh can reach its indexer
+
+[Service]
+Type=oneshot
+# The key only exists once the br_netfilter module is loaded.
+ExecStart=/bin/sh -c '[ -e /proc/sys/net/bridge/bridge-nf-call-iptables ] && /usr/sbin/sysctl -qw net.bridge.bridge-nf-call-iptables=0 || true'

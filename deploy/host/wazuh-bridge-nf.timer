@@ -1,0 +1,12 @@
+# RECONSTRUCTION, see wazuh-bridge-nf.service.
+[Unit]
+Description=Reapply bridge-nf-call-iptables=0 at boot and every 20 s
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=20s
+AccuracySec=1s
+Unit=wazuh-bridge-nf.service
+
+[Install]
+WantedBy=timers.target

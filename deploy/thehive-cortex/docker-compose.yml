@@ -1,0 +1,91 @@
+# =====================================================================
+# Couche REPONSE - TheHive 5 + Cortex 3  (lab SOC)
+# Secrets: copy .env.example to .env and fill it (the .env file is git-ignored).
+# TheHive : Cassandra + index Lucene LOCAL (pas d'ES dedie -> RAM).
+# Elasticsearch ne sert qu'a Cortex.
+#   TheHive  -> http://localhost:9000   (vendor default admin account: change it on first login)
+#   Cortex   -> http://localhost:9001
+# =====================================================================
+name: soc-response
+
+services:
+  cassandra:
+    image: cassandra:4.1
+    container_name: soc-cassandra
+    restart: unless-stopped
+    environment:
+      - MAX_HEAP_SIZE=1024M
+      - HEAP_NEWSIZE=256M
+      - CASSANDRA_CLUSTER_NAME=thp
+    mem_limit: 2g
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    networks: [response]
+
+  # Elasticsearch UNIQUEMENT pour Cortex
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.20
+    container_name: soc-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    mem_limit: 1g
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks: [response]
+
+  # Cortex : analyzers / responders (config via fichier monte + --no-config)
+  cortex:
+    image: thehiveproject/cortex:3.1.7
+    container_name: soc-cortex
+    restart: unless-stopped
+    depends_on: [elasticsearch]
+    command: ["--no-config"]
+    environment:
+      - CORTEX_SECRET=${CORTEX_SECRET:?set CORTEX_SECRET}
+    mem_limit: 1g
+    volumes:
+      - ./cortex-application.conf:/etc/cortex/application.conf:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - cortex-jobs:/tmp/cortex-jobs
+    ports:
+      - "9001:9001"
+    networks: [response]
+
+  # TheHive : config via options natives de l'entrypoint (recommande StrangeBee)
+  thehive:
+    image: strangebee/thehive:5.4
+    container_name: soc-thehive
+    restart: unless-stopped
+    depends_on: [cassandra]
+    mem_limit: 1536m
+    command:
+      - --secret
+      - "${THEHIVE_SECRET:?set THEHIVE_SECRET}"
+      - --cql-hostnames
+      - cassandra
+      - --index-backend
+      - lucene
+      - --cortex-hostnames
+      - cortex
+      - --cortex-port
+      - "9001"
+      - --cortex-keys
+      - "${CORTEX_API_KEY:?set CORTEX_API_KEY}"
+    volumes:
+      - thehive-data:/data
+    ports:
+      - "9000:9000"
+    networks: [response]
+
+networks:
+  response:
+    driver: bridge
+
+volumes:
+  cassandra-data:
+  es-data:
+  cortex-jobs:
+  thehive-data:

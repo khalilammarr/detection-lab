@@ -1,0 +1,77 @@
+<!--
+  Additions made to the manager's ossec.conf (inside <ossec_config>), on top of
+  the stock single-node wazuh_manager.conf. Placeholders in angle brackets
+  must be filled before the file is mounted; none of the real values are in
+  this repository.
+
+  After editing, restart the manager. Note: a file copied in with `docker cp`
+  can end up owned by uid 1000 and the manager then fails with
+  "Error reading XML"; chown it to wazuh:wazuh and chmod 0660.
+-->
+
+<!-- Syslog from the OPNsense firewall (filterlog). The port 514/udp is already
+     published by deploy/wazuh/docker-compose.yml. -->
+<remote>
+  <connection>syslog</connection>
+  <port>514</port>
+  <protocol>udp</protocol>
+  <allowed-ips>10.10.10.99</allowed-ips>
+</remote>
+
+<!-- Temporary ban of the attacking IP on the agent after SSH brute force
+     (rules 5712 / 5763). The ban lifts itself after 600 s. -->
+<active-response>
+  <command>firewall-drop</command>
+  <location>local</location>
+  <rules_id>5712,5763</rules_id>
+  <timeout>600</timeout>
+</active-response>
+
+<!-- Level >= 10 alerts go straight to Telegram. The bot token and chat id are
+     read by the script from TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID (or from
+     /var/ossec/etc/telegram.env); hook_url is passed to the script but unused. -->
+<integration>
+  <name>custom-telegram</name>
+  <level>10</level>
+  <alert_format>json</alert_format>
+  <hook_url>https://api.telegram.org</hook_url>
+</integration>
+
+<!-- Level >= 10 alerts create an alert in TheHive (the analyst promotes it to a case). -->
+<integration>
+  <name>custom-w2thive</name>
+  <level>10</level>
+  <alert_format>json</alert_format>
+  <api_key><THEHIVE_API_KEY></api_key>
+  <hook_url>http://10.10.10.1:9000</hook_url>
+</integration>
+
+<!-- Level >= 10 alerts also go to Shuffle through a webhook. The runbook describes
+     one integration per playbook, routed by rule group:
+       playbook 1  authentication_failures,ids
+       playbook 2  yara,malware
+       playbook 3  off_hours
+     Groups soc_alert and usb are not sent to Shuffle; they go to Telegram only. -->
+<integration>
+  <name>shuffle</name>
+  <group>authentication_failures,ids</group>
+  <level>10</level>
+  <alert_format>json</alert_format>
+  <hook_url>http://10.10.10.1:3001/api/v1/hooks/webhook_<PLAYBOOK1_WEBHOOK_ID></hook_url>
+</integration>
+
+<integration>
+  <name>shuffle</name>
+  <group>yara,malware</group>
+  <level>10</level>
+  <alert_format>json</alert_format>
+  <hook_url>http://10.10.10.1:3001/api/v1/hooks/webhook_<PLAYBOOK2_WEBHOOK_ID></hook_url>
+</integration>
+
+<integration>
+  <name>shuffle</name>
+  <group>off_hours</group>
+  <level>10</level>
+  <alert_format>json</alert_format>
+  <hook_url>http://10.10.10.1:3001/api/v1/hooks/webhook_<PLAYBOOK3_WEBHOOK_ID></hook_url>
+</integration>
